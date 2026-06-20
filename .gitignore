@@ -78,3 +78,4 @@ logs/
 # Misc temp
 tmp/
 temp/
+dist-lambda/

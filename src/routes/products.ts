@@ -45,21 +45,30 @@ router.get("/", optionalAuth, async (req, res) => {
   const { category, keyword, in_stock } = req.query;
   const isAdmin = req.user?.role === "ADMIN";
 
+  const where: Record<string, unknown> = {
+    status: { not: "REMOVED" },
+  };
+  if (!isAdmin) {
+    where.visible = true;
+  }
+  const categoryVal = Array.isArray(category) ? category[0] : category;
+  if (categoryVal) {
+    where.category = String(categoryVal);
+  }
+  const keywordVal = Array.isArray(keyword) ? keyword[0] : keyword;
+  if (keywordVal) {
+    where.OR = [
+      { title: { contains: String(keywordVal), mode: "insensitive" } },
+      { description: { contains: String(keywordVal), mode: "insensitive" } },
+    ];
+  }
+  const inStockVal = Array.isArray(in_stock) ? in_stock[0] : in_stock;
+  if (inStockVal === "true") {
+    where.stockQty = { gt: 0 };
+  }
+
   const products = await prisma.product.findMany({
-    where: {
-      status: { not: "REMOVED" },
-      ...(!isAdmin ? { visible: true } : {}),
-      ...(category ? { category: String(category) } : {}),
-      ...(keyword
-        ? {
-            OR: [
-              { title: { contains: String(keyword), mode: "insensitive" } },
-              { description: { contains: String(keyword), mode: "insensitive" } },
-            ],
-          }
-        : {}),
-      ...(in_stock === "true" ? { stockQty: { gt: 0 } } : {}),
-    },
+    where,
     include: { seller: true },
     orderBy: { createdAt: "desc" },
   });
@@ -129,7 +138,7 @@ router.get("/:id", optionalAuth, async (req, res) => {
   const isAdmin = req.user?.role === "ADMIN";
   const product = await prisma.product.findFirst({
     where: {
-      id: req.params.id,
+      id: String(req.params.id),
       status: { not: "REMOVED" },
       ...(!isAdmin ? { visible: true } : {}),
     },
@@ -140,15 +149,26 @@ router.get("/:id", optionalAuth, async (req, res) => {
   });
 
   if (!product) return res.status(404).json({ error: "Product not found" });
+
+  type ReviewRow = {
+    id: string;
+    rating: number;
+    body: string;
+    created_at: Date;
+    buyer_email: string;
+  };
+
+  const reviews: ReviewRow[] = product.reviews.map((r: { id: string; rating: number; body: string; createdAt: Date; buyer: { email: string } }) => ({
+    id: r.id,
+    rating: r.rating,
+    body: r.body,
+    created_at: r.createdAt,
+    buyer_email: r.buyer.email.replace(/(.{2}).*(@.*)/, "$1***$2"),
+  }));
+
   res.json({
     ...formatProduct(product),
-    reviews: product.reviews.map((r) => ({
-      id: r.id,
-      rating: r.rating,
-      body: r.body,
-      created_at: r.createdAt,
-      buyer_email: r.buyer.email.replace(/(.{2}).*(@.*)/, "$1***$2"),
-    })),
+    reviews,
   });
 });
 
@@ -159,20 +179,21 @@ router.put("/:id", requireAuth, requireActiveSeller, async (req, res) => {
     if (!seller) return res.status(404).json({ error: "Seller profile not found" });
 
     const existing = await prisma.product.findFirst({
-      where: { id: req.params.id, sellerId: seller.id, status: { not: "REMOVED" } },
+      where: { id: String(req.params.id), sellerId: seller.id, status: { not: "REMOVED" } },
     });
     if (!existing) return res.status(404).json({ error: "Product not found" });
 
+    const updateData: Record<string, unknown> = {};
+    if (data.title !== undefined) updateData.title = data.title;
+    if (data.description !== undefined) updateData.description = data.description;
+    if (data.category !== undefined) updateData.category = data.category;
+    if (data.price_cents !== undefined) updateData.priceCents = data.price_cents;
+    if (data.stock_qty !== undefined) updateData.stockQty = data.stock_qty;
+    if (data.photos !== undefined) updateData.photos = data.photos;
+
     const product = await prisma.product.update({
-      where: { id: req.params.id },
-      data: {
-        ...(data.title !== undefined ? { title: data.title } : {}),
-        ...(data.description !== undefined ? { description: data.description } : {}),
-        ...(data.category !== undefined ? { category: data.category } : {}),
-        ...(data.price_cents !== undefined ? { priceCents: data.price_cents } : {}),
-        ...(data.stock_qty !== undefined ? { stockQty: data.stock_qty } : {}),
-        ...(data.photos !== undefined ? { photos: data.photos } : {}),
-      },
+      where: { id: String(req.params.id) },
+      data: updateData,
     });
 
     await syncProductStockStatus(product.id);
@@ -191,12 +212,12 @@ router.delete("/:id", requireAuth, requireActiveSeller, async (req, res) => {
   if (!seller) return res.status(404).json({ error: "Seller profile not found" });
 
   const existing = await prisma.product.findFirst({
-    where: { id: req.params.id, sellerId: seller.id },
+    where: { id: String(req.params.id), sellerId: seller.id },
   });
   if (!existing) return res.status(404).json({ error: "Product not found" });
 
   await prisma.product.update({
-    where: { id: req.params.id },
+    where: { id: String(req.params.id) },
     data: { status: "REMOVED", visible: false },
   });
 

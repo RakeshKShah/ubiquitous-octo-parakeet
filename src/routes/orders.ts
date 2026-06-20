@@ -7,6 +7,17 @@ import { syncProductStockStatus } from "../services/payouts";
 
 const router = Router();
 
+type LineItem = {
+  product: {
+    id: string;
+    sellerId: string;
+    priceCents: number;
+    title: string;
+    seller: { storeName: string; user: { email: string } };
+  };
+  qty: number;
+};
+
 const checkoutSchema = z.object({
   items: z.array(
     z.object({
@@ -20,7 +31,7 @@ router.post("/checkout", requireAuth, requireRole("BUYER"), async (req, res) => 
   try {
     const data = checkoutSchema.parse(req.body);
 
-    const lineItems = [];
+    const lineItems: LineItem[] = [];
     let totalCents = 0;
 
     for (const item of data.items) {
@@ -40,10 +51,19 @@ router.post("/checkout", requireAuth, requireRole("BUYER"), async (req, res) => 
 
       const lineTotal = product.priceCents * item.qty;
       totalCents += lineTotal;
-      lineItems.push({ product, qty: item.qty, lineTotal });
+      lineItems.push({
+        product: {
+          id: product.id,
+          sellerId: product.sellerId,
+          priceCents: product.priceCents,
+          title: product.title,
+          seller: { storeName: product.seller.storeName, user: product.seller.user },
+        },
+        qty: item.qty,
+      });
     }
 
-    const { platformFeeCents, sellerPayoutCents } = calcFees(totalCents);
+    const { platformFeeCents } = calcFees(totalCents);
 
     const order = await prisma.order.create({
       data: {
@@ -52,8 +72,8 @@ router.post("/checkout", requireAuth, requireRole("BUYER"), async (req, res) => 
         platformFeeCents,
         status: "PENDING",
         items: {
-          create: lineItems.map(({ product, qty, lineTotal }) => {
-            const fees = calcFees(lineTotal);
+          create: lineItems.map(({ product, qty }) => {
+            const fees = calcFees(product.priceCents * qty);
             return {
               productId: product.id,
               sellerId: product.sellerId,
@@ -117,9 +137,10 @@ router.get("/", requireAuth, requireRole("BUYER"), async (req, res) => {
 
 router.get("/:id", requireAuth, async (req, res) => {
   const order = await prisma.order.findUnique({
-    where: { id: req.params.id },
+    where: { id: String(req.params.id) },
     include: {
-      items: { include: { product: true, review: true } },
+      buyer: { include: { sellerProfile: true } },
+      items: { include: { product: true, review: { include: { buyer: { select: { email: true } } } } } },
     },
   });
 
@@ -127,7 +148,7 @@ router.get("/:id", requireAuth, async (req, res) => {
 
   const isBuyer = order.buyerId === req.user!.id;
   const isSeller = order.items.some(
-    (i) => i.product.sellerId === req.user!.sellerProfileId,
+    (i: { product: { sellerId: string } }) => i.product.sellerId === req.user!.sellerProfileId,
   );
   const isAdmin = req.user!.role === "ADMIN";
 
@@ -144,7 +165,7 @@ router.post("/:id/ship", requireAuth, async (req, res) => {
   }
 
   const order = await prisma.order.findUnique({
-    where: { id: req.params.id },
+    where: { id: String(req.params.id) },
     include: { items: { include: { product: true } } },
   });
 
@@ -154,7 +175,7 @@ router.post("/:id/ship", requireAuth, async (req, res) => {
   }
 
   const sellerItems = order.items.filter(
-    (i) => i.product.sellerId === req.user!.sellerProfileId,
+    (i: { product: { sellerId: string } }) => i.product.sellerId === req.user!.sellerProfileId,
   );
   if (sellerItems.length === 0) {
     return res.status(403).json({ error: "No items for your shop in this order" });
@@ -169,7 +190,7 @@ router.post("/:id/ship", requireAuth, async (req, res) => {
 });
 
 router.post("/:id/deliver", requireAuth, async (req, res) => {
-  const order = await prisma.order.findUnique({ where: { id: req.params.id } });
+  const order = await prisma.order.findUnique({ where: { id: String(req.params.id) } });
   if (!order) return res.status(404).json({ error: "Order not found" });
 
   const isBuyer = order.buyerId === req.user!.id;

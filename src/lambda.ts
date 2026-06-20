@@ -1,8 +1,6 @@
 import { app } from "./index";
 import createServer from "@vendia/serverless-express";
 
-const server = createServer({ app });
+const handler = createServer({ app }) as unknown as (event: unknown, context: unknown) => Promise<unknown>;
 
-export const handler = async (event: any, context: any) => {
-  return server(event, context);
-};
+export { handler };

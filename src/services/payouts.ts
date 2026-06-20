@@ -1,5 +1,11 @@
 import { prisma, calcFees } from "../utils/prisma";
 
+type PayoutItem = {
+  id: string;
+  sellerPayoutCents: number;
+  product: { sellerId: string; seller: { id: string; storeName: string } };
+};
+
 export async function runWeeklyPayouts() {
   const now = new Date();
   const periodEnd = new Date(now);
@@ -18,15 +24,15 @@ export async function runWeeklyPayouts() {
     include: { product: { include: { seller: true } } },
   });
 
-  const bySeller = new Map<string, typeof unpaidItems>();
+  const bySeller = new Map<string, PayoutItem[]>();
   for (const item of unpaidItems) {
     const sellerId = item.product.sellerId;
     const list = bySeller.get(sellerId) ?? [];
-    list.push(item);
+    list.push(item as PayoutItem);
     bySeller.set(sellerId, list);
   }
 
-  const results = [];
+  const results: Array<{ id: string; amountCents: number }> = [];
 
   for (const [sellerId, items] of bySeller) {
     const amountCents = items.reduce((s, i) => s + i.sellerPayoutCents, 0);

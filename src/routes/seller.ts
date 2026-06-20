@@ -23,14 +23,23 @@ router.get("/dashboard", requireAuth, requireActiveSeller, async (req, res) => {
     take: 50,
   });
 
-  const earnings = orderItems.reduce((s, i) => s + i.sellerPayoutCents, 0);
+  const earnings = orderItems.reduce((s: number, i: { sellerPayoutCents: number }) => s + i.sellerPayoutCents, 0);
+
+  type OrderItemRow = {
+    id: string;
+    orderId: string;
+    product: { title: string };
+    qty: number;
+    order: { buyer: { email: string }; status: string; createdAt: Date };
+    sellerPayoutCents: number;
+  };
 
   res.json({
     store_name: seller.storeName,
     bio: seller.bio,
     status: req.user!.status,
     products: seller.products,
-    orders: orderItems.map((i) => ({
+    orders: orderItems.map((i: OrderItemRow) => ({
       id: i.id,
       order_id: i.orderId,
       product_title: i.product.title,
