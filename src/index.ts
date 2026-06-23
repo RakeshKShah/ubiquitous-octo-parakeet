@@ -26,7 +26,7 @@ export { app };
 const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
 
 if (!isLambda) {
-  const PORT = process.env.PORT ?? 4000;
+  const PORT = process.env.PORT ?? 6713;
   cron.schedule("0 9 * * 1", () => {
     console.log("[cron] Running weekly payouts...");
     runWeeklyPayouts()
